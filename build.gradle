@@ -1,0 +1,99 @@
+buildscript {
+    repositories {
+        mavenCentral()
+        maven { url = 'https://maven.minecraftforge.net/' }
+    }
+    dependencies { classpath 'com.anatawa12.forge:ForgeGradle:1.2-1.0.12' }
+}
+apply plugin: 'forge'
+apply plugin: 'idea'
+
+group = 'sereneseasons'
+version = '1.2.0-legacy'
+archivesBaseName = 'SereneSeasons-1.7.10'
+sourceCompatibility = targetCompatibility = JavaVersion.VERSION_1_8
+
+minecraft { version = '1.7.10-10.13.4.1614-1.7.10' }
+repositories { mavenCentral() }
+dependencies { compile 'org.ow2.asm:asm-debug-all:5.0.3' }
+// API only: TAN stays optional at runtime and is never bundled into our JAR.
+def tanJar = file('run/mods/ToughAsNails-1.7.10-1.0.1-1.7.10.jar')
+dependencies { compileOnly files(tanJar) }
+
+tasks.withType(JavaCompile) { options.encoding = 'UTF-8' }
+idea.module {
+    inheritOutputDirs = true
+    excludeDirs += file('run')
+}
+jar {
+    manifest.attributes 'FMLCorePlugin': 'sereneseasons.asm.SeasonsLoadingPlugin',
+        'FMLCorePluginContainsFMLMod': 'true'
+}
+processResources {
+    inputs.property 'version', project.version
+    from(sourceSets.main.resources.srcDirs) {
+        include 'mcmod.info'
+        expand 'version': project.version
+    }
+    from(sourceSets.main.resources.srcDirs) { exclude 'mcmod.info' }
+}
+task devJar(type: Jar) {
+    classifier = 'dev'
+    manifest = jar.manifest
+    from sourceSets.main.output
+}
+artifacts { archives devJar }
+task legacyChecks(type: JavaExec, dependsOn: testClasses) {
+    classpath = sourceSets.test.runtimeClasspath
+    main = 'sereneseasons.LegacyChecks'
+    args file("${gradle.gradleUserHomeDir}/caches/minecraft/net/minecraftforge/forge/1.7.10-10.13.4.1614-1.7.10/unpacked/conf/methods.csv").absolutePath
+}
+check.dependsOn legacyChecks
+task tanDevJar(type: JavaExec, dependsOn: testClasses) {
+    classpath = sourceSets.test.runtimeClasspath
+    main = 'sereneseasons.RemapTanForDev'
+    args tanJar.absolutePath, file('build/compat/ToughAsNails-dev.jar').absolutePath,
+        file("${gradle.gradleUserHomeDir}/caches/minecraft/net/minecraftforge/forge/1.7.10-10.13.4.1614-1.7.10/unpacked/conf").absolutePath
+}
+runServer { args 'nogui' }
+
+// Opt-in integration fixture. Never packaged in either distributable JAR.
+sourceSets {
+    runtimeTest {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.runtimeClasspath
+    }
+}
+// Reobfuscated test driver for a real launcher installation; never included in SS.
+task releaseChecksJar(type: Jar, dependsOn: runtimeTestClasses) {
+    archiveName = 'SS-release-checks.jar'
+    destinationDir = file('build/verification')
+    from sourceSets.runtimeTest.output
+}
+if (project.hasProperty('releaseChecks')) reobf.reobf(releaseChecksJar) { spec -> spec.classpath = sourceSets.runtimeTest.compileClasspath }
+if (project.hasProperty('runtimeChecks') || project.hasProperty('itemChecks') || project.hasProperty('parityChecks') || project.hasProperty('tanChecks') || project.hasProperty('standaloneChecks')) {
+    runClient.dependsOn runtimeTestClasses
+    runClient.doFirst { classpath += sourceSets.runtimeTest.output }
+}
+if (project.hasProperty('tanChecks') || project.hasProperty('standaloneChecks')) {
+    if (project.hasProperty('tanChecks')) runClient.dependsOn tanDevJar
+    runClient.systemProperty 'sereneseasons.compatChecks', 'true'
+    runClient.systemProperty 'sereneseasons.expectTan', project.hasProperty('tanChecks').toString()
+    runClient.doFirst {
+        def dir = file(project.hasProperty('tanChecks') ? 'run-tan' : 'run-standalone')
+        new File(dir, 'mods').mkdirs()
+        if (project.hasProperty('tanChecks')) copy { from file('build/compat/ToughAsNails-dev.jar'); into new File(dir, 'mods') }
+        workingDir dir
+    }
+}
+if (project.hasProperty('parityChecks')) {
+    runClient.systemProperty 'sereneseasons.parityChecks', 'true'
+    runClient.doFirst { file('run-parity').mkdirs(); workingDir file('run-parity') }
+}
+if (project.hasProperty('runtimeChecks')) {
+    runClient.doFirst { file('run-regression/config').mkdirs(); workingDir file('run-regression') }
+}
+if (project.hasProperty('itemChecks')) {
+    runClient.systemProperty 'sereneseasons.itemChecks', 'true'
+    runClient.doFirst { file('run-items').mkdirs(); workingDir file('run-items') }
+}

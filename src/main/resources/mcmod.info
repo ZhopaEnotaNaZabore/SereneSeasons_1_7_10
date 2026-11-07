@@ -1,0 +1,12 @@
+[
+  {
+    "modid": "sereneseasons",
+    "name": "Serene Seasons Legacy",
+    "description": "Legacy adaptation of Serene Seasons for Forge 1.7.10.",
+    "version": "${version}",
+    "mcversion": "1.7.10",
+    "authorList": ["Glitchfiend (original mod)"],
+    "credits": "Original Serene Seasons code and assets: Glitchfiend. Unofficial legacy adaptation.",
+    "logoFile": "ss_logo.png"
+  }
+]
